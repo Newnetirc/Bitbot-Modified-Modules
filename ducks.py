@@ -18,7 +18,7 @@ DEFAULT_MIN_MESSAGES = 50
     "Whether or not to kick someone talking to non-existent ducks"))
 @utils.export("channelset", utils.BoolSetting("ducks-prevent-highlight",
     "Whether or not to prevent highlighting users with !friends/!enemies"))
-@utils.export("channelset", utils.IntRangeSetting(0, 100000, "ducks-fine", "The fine amount the users get fined when you shoot a duck"))
+@utils.export("channelset", utils.IntRangeSetting(0, 100, "ducks-fine", "The fine amount the users get fined when you shoot a duck"))
 
 class Module(ModuleManager.BaseModule):
     @utils.hook("new.channel")
