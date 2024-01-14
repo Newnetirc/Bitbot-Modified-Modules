@@ -3,6 +3,7 @@
 #--depends-on coins
 
 import random, re, time
+import decimal
 from src import EventManager, ModuleManager, utils
 
 DUCK = "・゜゜・。。・゜゜\_o< QUACK!"
@@ -72,13 +73,16 @@ class Module(ModuleManager.BaseModule):
         channel.duck_lines = 0
         channel.send_message(DUCK)
 
-    def _duck_action(self, channel, user, action, setting, fine_enabled=False):
+    def _duck_action(self, channel, user, action, setting, event, fine_enabled=False):
         if channel.get_setting("ducks-fine", 0) != 0 and fine_enabled:
             coins = self.bot.modules.modules['coins'].module
-            fine_amount = channel.get_setting("ducks-fine",1)
+            interest_percentage = channel.get_setting("ducks-fine",1)
+            total_coins = decimal.Decimal(sum(coins._all_coins(event['server']).values()))
+            fine_amount = total_coins*(decimal.Decimal(0.01)*interest_percentage)
+            fine_amount = fine_amount.quantize(decimal.Decimal('.01'), rounding=decimal.ROUND_05UP) # Round number to appropriate units
             user_coins = coins._get_user_coins(user)
             if user_coins < fine_amount:
-                return f"There was a duck, but you didn't have coins to pay the fine of {fine_amount-user_coins} so you can't shoot the duck."
+                return f"There was a duck, but you didn't have coins to pay the fine of {fine_amount} coins so you can't shoot the duck."
             else:
                 new_user_coins = user_coins - fine_amount
                 coins._set_user_coins(user, new_user_coins)
@@ -119,7 +123,7 @@ class Module(ModuleManager.BaseModule):
     def befriend(self, event):
         if event["target"].duck_active:
             action = self._duck_action(event["target"], event["user"],
-                "befriended", "ducks-befriended")
+                "befriended", event, "ducks-befriended")
             event["stdout"].write(action)
         else:
             self._no_duck(event["target"], event["user"], event["stderr"])
@@ -130,7 +134,7 @@ class Module(ModuleManager.BaseModule):
     def trap(self, event):
         if event["target"].duck_active:
             action = self._duck_action(event["target"], event["user"],
-                "trapped", "ducks-shot", fine_enabled=True)
+                "trapped", "ducks-shot", event, fine_enabled=True)
             event["stdout"].write(action)
         else:
             self._no_duck(event["target"], event["user"], event["stderr"])
@@ -141,7 +145,7 @@ class Module(ModuleManager.BaseModule):
     def bang(self, event):
         if event["target"].duck_active:
             action = self._duck_action(event["target"], event["user"],
-                "shot", "ducks-shot", fine_enabled=True)
+                "shot", "ducks-shot", event, fine_enabled=True)
             event["stdout"].write(action)
         else:
             self._no_duck(event["target"], event["user"], event["stderr"])
