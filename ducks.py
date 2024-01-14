@@ -18,7 +18,7 @@ DEFAULT_MIN_MESSAGES = 50
     "Whether or not to kick someone talking to non-existent ducks"))
 @utils.export("channelset", utils.BoolSetting("ducks-prevent-highlight",
     "Whether or not to prevent highlighting users with !friends/!enemies"))
-@utils.export("channelset", utils.IntRangeSetting(0, 100, "ducks-fine", "The fine amount the users get fined when you shoot a duck"))
+@utils.export("channelset", utils.IntRangeSetting(0, 100, "ducks-fine-percentage", "The fine amount the users get fined when you shoot a duck"))
 
 class Module(ModuleManager.BaseModule):
     @utils.hook("new.channel")
@@ -74,9 +74,9 @@ class Module(ModuleManager.BaseModule):
         channel.send_message(DUCK)
 
     def _duck_action(self, channel, user, action, setting, event, fine_enabled=False):
-        if channel.get_setting("ducks-fine", 0) != 0 and fine_enabled:
+        if channel.get_setting("ducks-fine-percentage", 0) != 0 and fine_enabled:
             coins = self.bot.modules.modules['coins'].module
-            interest_percentage = channel.get_setting("ducks-fine",1)
+            interest_percentage = channel.get_setting("ducks-fine-percentage",1)
             total_coins = decimal.Decimal(sum(coins._all_coins(event['server']).values()))
             fine_amount = total_coins*(decimal.Decimal(0.01)*interest_percentage)
             fine_amount = fine_amount.quantize(decimal.Decimal('.01'), rounding=decimal.ROUND_05UP) # Round number to appropriate units
