@@ -73,11 +73,20 @@ class Module(ModuleManager.BaseModule):
         channel.duck_lines = 0
         channel.send_message(DUCK)
 
+    def _total_coins(self, event):
+        coins = self.bot.modules.modules['coins'].module
+        return decimal.Decimal(sum(coins._all_coins(event['server']).values()))
+
+    @utils.hook("received.command.totalcoins")
+    @utils.kwarg("help", "Show total coins")
+    def duck_total_coins_amount(self, event):
+        event["stdout"].write(f"There are a total of: {self._total_coins(event)} coins")
+
     def _duck_action(self, channel, user, action, setting, event, fine_enabled=False):
         if channel.get_setting("ducks-fine-percentage", 0) != 0 and fine_enabled:
             coins = self.bot.modules.modules['coins'].module
             interest_percentage = channel.get_setting("ducks-fine-percentage",1)
-            total_coins = decimal.Decimal(sum(coins._all_coins(event['server']).values()))
+            total_coins = self._total_coins(event)
             fine_amount = total_coins*(decimal.Decimal(0.01)*interest_percentage)
             fine_amount = fine_amount.quantize(decimal.Decimal('.01'), rounding=decimal.ROUND_05UP) # Round number to appropriate units
             user_coins = coins._get_user_coins(user)
