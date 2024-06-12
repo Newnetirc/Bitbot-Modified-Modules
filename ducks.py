@@ -1,14 +1,19 @@
-#--depends-on commands
-#--depends-on config
-#--depends-on coins
-
 import random, re, time
 import decimal
 from src import EventManager, ModuleManager, utils
 
-DUCK = "・゜゜・。。・゜゜\_o< QUACK!"
+DUCK_MESSAGES = [
+    "・゜゜・。。・゜゜\\_o< QUACK! I'm here!",
+    "・゜゜・。。・゜゜\\_o< QUACK! You found me!",
+    "・゜゜・。。・゜゜\\_o< QUACK! Catch me if you can!"
+]
 
 DEFAULT_MIN_MESSAGES = 50
+DUCK_REWARDS = {
+    10: "Duck Lover",
+    50: "Duck Enthusiast",
+    100: "Duck Master",
+}
 
 @utils.export("channelset", utils.BoolSetting("ducks-enabled",
     "Whether or not to spawn ducks"))
@@ -21,6 +26,10 @@ DEFAULT_MIN_MESSAGES = 50
 @utils.export("channelset", utils.IntRangeSetting(0, 100, "ducks-fine-percentage", "The fine amount the users get fined when you shoot a duck"))
 
 class Module(ModuleManager.BaseModule):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.duck_hunt_active = False
+
     @utils.hook("new.channel")
     def new_channel(self, event):
         self.bootstrap_channel(event["channel"])
@@ -35,12 +44,11 @@ class Module(ModuleManager.BaseModule):
 
         ducks_enabled = channel.get_setting("ducks-enabled", False)
 
-        if (ducks_enabled and
-                not channel.duck_active and
-                not channel.duck_lines == -1):
+        if (ducks_enabled and not channel.duck_active and not channel.duck_lines == -1):
             channel.duck_lines += 1
-            min_lines = channel.get_setting("ducks-min-messages",
-                DEFAULT_MIN_MESSAGES)
+            min_lines = channel.get_setting("ducks-min-messages", DEFAULT_MIN_MESSAGES)
+            if self.duck_hunt_active:
+                min_lines = min_lines // 2  # Ducks appear twice as often during duck hunt
 
             if channel.duck_lines >= min_lines:
                 show_duck = random.SystemRandom().randint(1, 20) == 1
@@ -71,7 +79,8 @@ class Module(ModuleManager.BaseModule):
         channel = timer.kwargs["channel"]
         channel.duck_active = time.time()
         channel.duck_lines = 0
-        channel.send_message(DUCK)
+        message = random.choice(DUCK_MESSAGES)
+        channel.send_message(message)
 
     def _total_coins(self, event):
         coins = self.bot.modules.modules['coins'].module
@@ -85,10 +94,10 @@ class Module(ModuleManager.BaseModule):
     def _duck_action(self, channel, user, action, setting, event, fine_enabled=False):
         if channel.get_setting("ducks-fine-percentage", 0) != 0 and fine_enabled:
             coins = self.bot.modules.modules['coins'].module
-            interest_percentage = channel.get_setting("ducks-fine-percentage",1)
+            interest_percentage = channel.get_setting("ducks-fine-percentage", 1)
             total_coins = self._total_coins(event)
-            fine_amount = total_coins*(decimal.Decimal(0.01)*interest_percentage)
-            fine_amount = fine_amount.quantize(decimal.Decimal('.01'), rounding=decimal.ROUND_05UP) # Round number to appropriate units
+            fine_amount = total_coins * (decimal.Decimal(0.01) * interest_percentage)
+            fine_amount = fine_amount.quantize(decimal.Decimal('.01'), rounding=decimal.ROUND_05UP)  # Round number to appropriate units
             user_coins = coins._get_user_coins(user)
             if user_coins < fine_amount:
                 return f"There was a duck, but you didn't have coins to pay the fine of {fine_amount} coins so you can't shoot the duck."
@@ -105,19 +114,27 @@ class Module(ModuleManager.BaseModule):
         action_count += 1
         channel.set_user_setting(user_id, setting, action_count)
 
-        seconds = round(time.time()-duck_timestamp, 2)
+        seconds = round(time.time() - duck_timestamp, 2)
 
         ducks_plural = "duck" if action_count == 1 else "ducks"
 
-        return "%s %s a duck in %s seconds! You've %s %d %s in %s!" % (
+        points = self._award_points(user, 10)
+        level_up = self._check_level_up(user, points)
+
+        response = "%s %s a duck in %s seconds! You've %s %d %s in %s!" % (
             user.nickname, action, seconds, action, action_count, ducks_plural,
             channel.name)
+        
+        if level_up:
+            response += f" Congratulations {user.nickname}! You've reached the level: {level_up}"
+
+        return response
 
     def _no_duck(self, channel, user, stderr):
         message = "There was no duck!"
         duck_timestamp = channel.get_setting("duck-last", None)
         if not duck_timestamp == None:
-            seconds = round(time.time()-duck_timestamp, 2)
+            seconds = round(time.time() - duck_timestamp, 2)
             message += " missed by %s seconds" % seconds
 
         if channel.get_setting("ducks-kick"):
@@ -131,8 +148,7 @@ class Module(ModuleManager.BaseModule):
     @utils.spec("!-channelonly")
     def befriend(self, event):
         if event["target"].duck_active:
-            action = self._duck_action(event["target"], event["user"],
-                "befriended", event, "ducks-befriended")
+            action = self._duck_action(event["target"], event["user"], "befriended", event, "ducks-befriended")
             event["stdout"].write(action)
         else:
             self._no_duck(event["target"], event["user"], event["stderr"])
@@ -142,8 +158,7 @@ class Module(ModuleManager.BaseModule):
     @utils.spec("!-channelonly")
     def trap(self, event):
         if event["target"].duck_active:
-            action = self._duck_action(event["target"], event["user"],
-                "trapped", "ducks-shot", event, fine_enabled=True)
+            action = self._duck_action(event["target"], event["user"], "trapped", "ducks-shot", event, fine_enabled=True)
             event["stdout"].write(action)
         else:
             self._no_duck(event["target"], event["user"], event["stderr"])
@@ -153,8 +168,7 @@ class Module(ModuleManager.BaseModule):
     @utils.spec("!-channelonly")
     def bang(self, event):
         if event["target"].duck_active:
-            action = self._duck_action(event["target"], event["user"],
-                "shot", "ducks-shot", event, fine_enabled=True)
+            action = self._duck_action(event["target"], event["user"], "shot", "ducks-shot", event, fine_enabled=True)
             event["stdout"].write(action)
         else:
             self._no_duck(event["target"], event["user"], event["stderr"])
@@ -170,25 +184,19 @@ class Module(ModuleManager.BaseModule):
     @utils.kwarg("help", "Show top 10 duck friends")
     @utils.spec("?<channel>word")
     def friends(self, event):
-        query = self._target(event["target"], event["is_channel"],
-            event["spec"][0])
-
-        stats = self._top_duck_stats(event["server"], event["target"],
-            "ducks-befriended", "friends", query)
+        query = self._target(event["target"], event["is_channel"], event["spec"][0])
+        stats = self._top_duck_stats(event["server"], event["target"], "ducks-befriended", "friends", query)
         event["stdout"].write(stats)
+
     @utils.hook("received.command.enemies")
     @utils.kwarg("help", "Show top 10 duck enemies")
     @utils.spec("?<channel>word")
     def enemies(self, event):
-        query = self._target(event["target"], event["is_channel"],
-            event["spec"][0])
-
-        stats = self._top_duck_stats(event["server"], event["target"],
-            "ducks-shot", "enemies", query)
+        query = self._target(event["target"], event["is_channel"], event["spec"][0])
+        stats = self._top_duck_stats(event["server"], event["target"], "ducks-shot", "enemies", query)
         event["stdout"].write(stats)
 
-    def _top_duck_stats(self, server, target, setting, description,
-            channel_query):
+    def _top_duck_stats(self, server, target, setting, description, channel_query):
         channel_query_str = ""
         if not channel_query == None:
             channel_query = server.irc_lower(channel_query)
@@ -203,10 +211,8 @@ class Module(ModuleManager.BaseModule):
                     user_stats[nickname] = 0
                 user_stats[nickname] += value
 
-        top_10 = utils.top_10(user_stats,
-            convert_key=lambda n: self._get_nickname(server, target, n))
-        return "Top duck %s%s: %s" % (description, channel_query_str,
-            ", ".join(top_10))
+        top_10 = utils.top_10(user_stats, convert_key=lambda n: self._get_nickname(server, target, n))
+        return "Top duck %s%s: %s" % (description, channel_query_str, ", ".join(top_10))
 
     def _get_nickname(self, server, target, nickname):
         nickname = server.get_user(nickname).nickname
@@ -220,8 +226,7 @@ class Module(ModuleManager.BaseModule):
     def duckstats(self, event):
         target_user = event["spec"][0] or event["user"]
 
-        befs = target_user.get_channel_settings_per_setting(
-            "ducks-befriended")
+        befs = target_user.get_channel_settings_per_setting("ducks-befriended")
         traps = target_user.get_channel_settings_per_setting("ducks-shot")
 
         all = [(chan, val, "bef") for chan, val in befs]
@@ -243,10 +248,50 @@ class Module(ModuleManager.BaseModule):
 
         current_str = ""
         if current:
-            current_str = " (%d/%d in %s)" % (current["bef"],
-                current["trap"], event["target"].name)
+            current_str = " (%d/%d in %s)" % (current["bef"], current["trap"], event["target"].name)
 
         event["stdout"].write(
             "%s has befriended %d and shot %d ducks%s" %
-            (target_user.nickname, overall["bef"], overall["trap"],
-            current_str))
+            (target_user.nickname, overall["bef"], overall["trap"], current_str))
+
+    @utils.hook("received.command.leaderboard")
+    @utils.kwarg("help", "Show duck leaderboard")
+    @utils.spec("?<channel>word")
+    def leaderboard(self, event):
+        query = self._target(event["target"], event["is_channel"], event["spec"][0])
+        stats = self._top_duck_stats(event["server"], event["target"], "duck_points", "points", query)
+        event["stdout"].write(stats)
+
+    def _award_points(self, user, points):
+        current_points = user.get_setting("duck_points", 0)
+        new_points = current_points + points
+        user.set_setting("duck_points", new_points)
+        return new_points
+
+    def _check_level_up(self, user, points):
+        for point_threshold, title in DUCK_REWARDS.items():
+            if points >= point_threshold and not user.get_setting(f"level_{point_threshold}", False):
+                user.set_setting(f"level_{point_threshold}", True)
+                return title
+        return None
+
+    @utils.hook("received.command.customduck")
+    @utils.kwarg("help", "Customize your duck")
+    @utils.spec("!<color>word")
+    def customduck(self, event):
+        color = event["spec"][0]
+        user = event["user"]
+        user.set_setting("duck_color", color)
+        event["stdout"].write(f"Your duck will now be {color}!")
+
+    @utils.hook("received.command.duckhunt")
+    @utils.kwarg("help", "Start a duck hunt event")
+    @utils.kwarg("permission", "admin")
+    def start_duck_hunt(self, event):
+        event["target"].send_message("Duck Hunt Event started! Ducks will appear more frequently for the next 5 minutes!")
+        self.duck_hunt_active = True
+        self.timers.add("duck_hunt_end", self.end_duck_hunt, 300, channel=event["target"])
+
+    def end_duck_hunt(self, timer):
+        self.duck_hunt_active = False
+        timer.kwargs["channel"].send_message("Duck Hunt Event has ended! Hope you had fun!")
